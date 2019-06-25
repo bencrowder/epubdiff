@@ -1,0 +1,181 @@
+#!/usr/bin/env python
+
+import os
+import re
+import shutil
+import sys
+import zipfile
+
+from pyquery import PyQuery as pq
+from subprocess import call
+
+
+text_extensions = [
+    '.html',
+    '.xhtml',
+    '.htm',
+]
+
+
+def unzip_epub(filename, directory):
+    """
+    Unzips an EPUB into the given directory.
+    """
+    file = zipfile.ZipFile(filename, 'r')
+    file.extractall(directory)
+
+
+def get_manifest_filename(directory):
+    """
+    Returns the manifest filename.
+    """
+    container = '{}/META-INF/container.xml'.format(directory)
+    with open(container, 'r') as f:
+        data = f.read()
+
+    regex = re.compile(r'<rootfile .*?full-path="(.+?)"', re.DOTALL)
+
+    m = re.search(regex, data)
+    if m:
+        return m.group(1)
+
+
+def parse_manifest(manifest, directory):
+    """
+    Parses a manifest.
+    """
+    with open('{}/{}'.format(directory, manifest), 'r') as f:
+        data = f.read()
+
+    m = re.search(
+        re.compile(r'<manifest>\s?(.*?)\s?</manifest>', re.DOTALL),
+        data,
+    )
+
+    if m:
+        contents = m.group(1)
+    else:
+        print('No manifest found. 0 files scrubbed.')
+        return []
+
+    # Split into lines based on newlines and tags
+    lines = re.split(r'\n|><', contents)
+
+    # And get the files
+    output = []
+    for line in lines:
+        m = re.search(
+            re.compile(r'href="(.+?)"', re.DOTALL),
+            line,
+        )
+
+        if m:
+            filename = m.group(1)
+            if (
+                os.path.splitext(filename)[1] in text_extensions
+                or
+                filename == 'toc.ncx'
+            ):
+                output.append(filename)
+
+    return output
+
+
+def concatenate_html(filenames):
+    """
+    Concatenates all HTML files for a given EPUB directory.
+    """
+    response = ''
+
+    for filename in filenames:
+        with open(filename, 'r') as f:
+            response += f.read()
+            response += '\n'
+
+    return response.strip()
+
+
+def get_file_list(directory):
+    """
+    Gets the list of HTML files for an EPUB directory.
+    """
+    # Get manifest
+    manifest_file = get_manifest_filename(directory)
+
+    # Get the directory for the EPUB
+    content_dir = os.path.dirname(manifest_file)
+
+    # Parse the manifest into a list of HTML files
+    filenames = parse_manifest(manifest_file, directory)
+
+    # Make sure the manifest loaded properly
+    if len(filenames) == 0:
+        print('No files found. Nothing scrubbed.')
+
+    # Prep directory
+    directory = os.path.join(directory, content_dir)
+
+    # Go through files
+    output = []
+    for filename in filenames:
+        extension = os.path.splitext(filename)[1]
+
+        if extension in text_extensions:
+            output.append('{}/{}'.format(directory, filename))
+
+    return output
+
+
+def save_html(html, file):
+    """
+    Saves the given HTML to the specified file.
+    """
+    with open(file, 'w') as f:
+        f.write(html)
+
+
+def clean_directory(directory):
+    """
+    Removes the temp directory.
+    """
+    if os.path.exists(directory):
+        shutil.rmtree(directory)
+
+
+if __name__ == '__main__':
+    # Get arguments
+    if len(sys.argv) >= 3:
+        file1 = sys.argv[1]
+        file2 = sys.argv[2]
+
+        base1 = os.path.splitext(file1)[0]
+        base2 = os.path.splitext(file2)[0]
+
+    # Output paths
+    temp_dir1 = '_tmp1'
+    temp_dir2 = '_tmp2'
+    output1 = '{}/{}.txt'.format(temp_dir1, base1)
+    output2 = '{}/{}.txt'.format(temp_dir2, base2)
+
+    # Unzip EPUBs
+    unzip_epub(file1, temp_dir1)
+    unzip_epub(file2, temp_dir2)
+
+    # Get manifest
+    files1 = get_file_list(temp_dir1)
+    files2 = get_file_list(temp_dir2)
+
+    # Concatenate
+    html1 = concatenate_html(files1)
+    html2 = concatenate_html(files2)
+
+    # Save out
+    save_html(html1, output1)
+    save_html(html2, output2)
+
+    # Diff
+    call(['diff', output1, output2])
+
+    # Cleanup
+    clean_directory(temp_dir1)
+    clean_directory(temp_dir2)
