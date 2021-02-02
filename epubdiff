@@ -148,8 +148,8 @@ if __name__ == '__main__':
         file1 = sys.argv[1]
         file2 = sys.argv[2]
 
-        base1 = os.path.splitext(file1)[0]
-        base2 = os.path.splitext(file2)[0]
+        base1 = os.path.splitext(os.path.basename(file1))[0]
+        base2 = os.path.splitext(os.path.basename(file2))[0]
 
     # Output paths
     temp_dir1 = '_tmp1'
